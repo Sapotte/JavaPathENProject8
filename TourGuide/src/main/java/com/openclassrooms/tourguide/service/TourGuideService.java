@@ -3,36 +3,26 @@ package com.openclassrooms.tourguide.service;
 import com.openclassrooms.tourguide.helper.InternalTestHelper;
 import com.openclassrooms.tourguide.tracker.Tracker;
 import com.openclassrooms.tourguide.user.User;
+import com.openclassrooms.tourguide.user.UserPreferences;
 import com.openclassrooms.tourguide.user.UserReward;
-
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Random;
-import java.util.UUID;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
-
 import gpsUtil.GpsUtil;
 import gpsUtil.location.Attraction;
 import gpsUtil.location.Location;
 import gpsUtil.location.VisitedLocation;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
 import tripPricer.Provider;
 import tripPricer.TripPricer;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.*;
+import java.util.stream.IntStream;
+
 @Service
 public class TourGuideService {
-	private Logger logger = LoggerFactory.getLogger(TourGuideService.class);
+	private final static Logger LOGGER = LoggerFactory.getLogger(TourGuideService.class);
 	private final GpsUtil gpsUtil;
 	private final RewardsService rewardsService;
 	private final TripPricer tripPricer = new TripPricer();
@@ -46,10 +36,10 @@ public class TourGuideService {
 		Locale.setDefault(Locale.US);
 
 		if (testMode) {
-			logger.info("TestMode enabled");
-			logger.debug("Initializing users");
+			LOGGER.info("TestMode enabled");
+			LOGGER.debug("Initializing users");
 			initializeInternalUsers();
-			logger.debug("Finished initializing users");
+			LOGGER.debug("Finished initializing users");
 		}
 		tracker = new Tracker(this);
 		addShutDownHook();
@@ -60,9 +50,8 @@ public class TourGuideService {
 	}
 
 	public VisitedLocation getUserLocation(User user) {
-		VisitedLocation visitedLocation = (user.getVisitedLocations().size() > 0) ? user.getLastVisitedLocation()
+        return (!user.getVisitedLocations().isEmpty()) ? user.getLastVisitedLocation()
 				: trackUserLocation(user);
-		return visitedLocation;
 	}
 
 	public User getUser(String userName) {
@@ -70,7 +59,7 @@ public class TourGuideService {
 	}
 
 	public List<User> getAllUsers() {
-		return internalUserMap.values().stream().collect(Collectors.toList());
+		return internalUserMap.values().stream().toList();
 	}
 
 	public void addUser(User user) {
@@ -80,10 +69,15 @@ public class TourGuideService {
 	}
 
 	public List<Provider> getTripDeals(User user) {
-		int cumulatativeRewardPoints = user.getUserRewards().stream().mapToInt(i -> i.getRewardPoints()).sum();
+		UserPreferences userPreferences = user.getUserPreferences();
+		int cumulatativeRewardPoints = user.getUserRewards().stream().mapToInt(UserReward::getRewardPoints).sum();
 		List<Provider> providers = tripPricer.getPrice(tripPricerApiKey, user.getUserId(),
-				user.getUserPreferences().getNumberOfAdults(), user.getUserPreferences().getNumberOfChildren(),
-				user.getUserPreferences().getTripDuration(), cumulatativeRewardPoints);
+				userPreferences.getNumberOfAdults(), userPreferences.getNumberOfChildren(),
+				userPreferences.getTripDuration(), cumulatativeRewardPoints);
+		providers.addAll(tripPricer.getPrice(tripPricerApiKey, user.getUserId(),
+				userPreferences.getNumberOfAdults(), userPreferences.getNumberOfChildren(),
+				userPreferences.getTripDuration(), cumulatativeRewardPoints));
+
 		user.setTripDeals(providers);
 		return providers;
 	}
@@ -107,17 +101,13 @@ public class TourGuideService {
 	}
 
 	private void addShutDownHook() {
-		Runtime.getRuntime().addShutdownHook(new Thread() {
-			public void run() {
-				tracker.stopTracking();
-			}
-		});
+		Runtime.getRuntime().addShutdownHook(new Thread(() -> tracker.stopTracking()));
 	}
 
 	/**********************************************************************************
-	 * 
+
 	 * Methods Below: For Internal Testing
-	 * 
+
 	 **********************************************************************************/
 	private static final String tripPricerApiKey = "test-server-api-key";
 	// Database connection will be used for external users, but for testing purposes
@@ -134,7 +124,7 @@ public class TourGuideService {
 
 			internalUserMap.put(userName, user);
 		});
-		logger.debug("Created " + InternalTestHelper.getInternalUserNumber() + " internal test users.");
+		LOGGER.debug("Created " + InternalTestHelper.getInternalUserNumber() + " internal test users.");
 	}
 
 	private void generateUserLocationHistory(User user) {
