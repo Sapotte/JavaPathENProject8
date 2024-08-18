@@ -1,5 +1,6 @@
 package com.openclassrooms.tourguide.service;
 
+import com.openclassrooms.tourguide.dto.AttractionInfo;
 import com.openclassrooms.tourguide.user.User;
 import com.openclassrooms.tourguide.user.UserReward;
 import gpsUtil.GpsUtil;
@@ -49,6 +50,17 @@ public class RewardsService {
 			attractionsNotRewarded.removeAll(newRewards.stream().map(UserReward::getAttraction).toList());
 		}
 		user.getUserRewards().addAll(newRewards);
+	}
+
+	public AttractionInfo getAttractionInfo(Attraction attraction, VisitedLocation userLocation) {
+		AttractionInfo attractionInfo = new AttractionInfo();
+		attractionInfo.setName(attraction.attractionName);
+		attractionInfo.setLocation(new Location(attraction.latitude, attraction.longitude));
+		double distance = getDistance(attraction, userLocation.location);
+		attractionInfo.setDistance(distance);
+		int rewardPoints = rewardsCentral.getAttractionRewardPoints(attraction.attractionId, userLocation.userId);
+		attractionInfo.setReward(rewardPoints);
+		return attractionInfo;
 	}
 
 	public boolean isWithinAttractionProximity(Attraction attraction, Location location) {

@@ -2,12 +2,16 @@ package com.openclassrooms.tourguide;
 
 import java.util.List;
 
+import com.openclassrooms.tourguide.dto.NearbyAttractions;
+import com.openclassrooms.tourguide.service.RewardsService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import gpsUtil.location.Attraction;
 import gpsUtil.location.VisitedLocation;
 
 import com.openclassrooms.tourguide.service.TourGuideService;
@@ -21,7 +25,10 @@ public class TourGuideController {
 
 	@Autowired
 	TourGuideService tourGuideService;
-	
+    @Qualifier("rewardsService")
+    @Autowired
+    private RewardsService rewardsService;
+
     @RequestMapping("/")
     public String index() {
         return "Greetings from TourGuide!";
@@ -42,11 +49,11 @@ public class TourGuideController {
         // The reward points for visiting each Attraction.
         //    Note: Attraction reward points can be gathered from RewardsCentral
     @RequestMapping("/getNearbyAttractions") 
-    public List<Attraction> getNearbyAttractions(@RequestParam String userName) {
-    	VisitedLocation visitedLocation = tourGuideService.getUserLocation(getUser(userName));
-    	return tourGuideService.getNearByAttractions(visitedLocation);
+    public ResponseEntity<NearbyAttractions> getNearbyAttractions(@RequestParam String userName) {
+        var nearbyAttractions = tourGuideService.getNearByAttractions(getLocation(userName));
+        return new ResponseEntity<>(nearbyAttractions, HttpStatus.OK);
     }
-    
+
     @RequestMapping("/getRewards") 
     public List<UserReward> getRewards(@RequestParam String userName) {
     	return tourGuideService.getUserRewards(getUser(userName));

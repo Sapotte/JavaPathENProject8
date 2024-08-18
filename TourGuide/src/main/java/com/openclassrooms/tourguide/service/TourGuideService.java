@@ -1,12 +1,13 @@
 package com.openclassrooms.tourguide.service;
 
+import com.openclassrooms.tourguide.dto.AttractionInfo;
+import com.openclassrooms.tourguide.dto.NearbyAttractions;
 import com.openclassrooms.tourguide.helper.InternalTestHelper;
 import com.openclassrooms.tourguide.tracker.Tracker;
 import com.openclassrooms.tourguide.user.User;
 import com.openclassrooms.tourguide.user.UserPreferences;
 import com.openclassrooms.tourguide.user.UserReward;
 import gpsUtil.GpsUtil;
-import gpsUtil.location.Attraction;
 import gpsUtil.location.Location;
 import gpsUtil.location.VisitedLocation;
 import org.slf4j.Logger;
@@ -18,6 +19,7 @@ import tripPricer.TripPricer;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 @Service
@@ -89,19 +91,20 @@ public class TourGuideService {
 		return visitedLocation;
 	}
 
-	public List<Attraction> getNearByAttractions(VisitedLocation visitedLocation) {
-		List<Attraction> nearbyAttractions = new ArrayList<>();
-		for (Attraction attraction : gpsUtil.getAttractions()) {
-			if (rewardsService.isWithinAttractionProximity(attraction, visitedLocation.location)) {
-				nearbyAttractions.add(attraction);
-			}
-		}
-
+	public NearbyAttractions getNearByAttractions(VisitedLocation userLocation) {
+		List<AttractionInfo> closestAttractions = gpsUtil.getAttractions().stream()
+				.map(attraction -> rewardsService.getAttractionInfo(attraction, userLocation))
+				.sorted(Comparator.comparingDouble(AttractionInfo::getDistance))
+				.limit(5)
+				.collect(Collectors.toList());
+		NearbyAttractions nearbyAttractions = new NearbyAttractions();
+		nearbyAttractions.setUserLocation(userLocation.location);
+		nearbyAttractions.setNearbyAttractionsInfo(closestAttractions);
 		return nearbyAttractions;
 	}
 
 	private void addShutDownHook() {
-		Runtime.getRuntime().addShutdownHook(new Thread(() -> tracker.stopTracking()));
+		Runtime.getRuntime().addShutdownHook(new Thread(tracker::stopTracking));
 	}
 
 	/**********************************************************************************
@@ -128,11 +131,11 @@ public class TourGuideService {
 	}
 
 	private void generateUserLocationHistory(User user) {
-		IntStream.range(0, 3).forEach(i -> {
-			user.addToVisitedLocations(new VisitedLocation(user.getUserId(),
-					new Location(generateRandomLatitude(), generateRandomLongitude()), getRandomTime()));
-		});
-	}
+        for (int i = 0; i < 3; i++) {
+            user.addToVisitedLocations(new VisitedLocation(user.getUserId(),
+                    new Location(generateRandomLatitude(), generateRandomLongitude()), getRandomTime()));
+        }
+    }
 
 	private double generateRandomLongitude() {
 		double leftLimit = -180;
