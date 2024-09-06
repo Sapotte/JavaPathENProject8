@@ -19,6 +19,7 @@ import tripPricer.TripPricer;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -29,6 +30,9 @@ public class TourGuideService {
 	private final RewardsService rewardsService;
 	private final TripPricer tripPricer = new TripPricer();
 	public final Tracker tracker;
+
+	private final ExecutorService executorService = Executors.newFixedThreadPool(20);
+
 	boolean testMode = true;
 
 	public TourGuideService(GpsUtil gpsUtil, RewardsService rewardsService) {
@@ -64,6 +68,18 @@ public class TourGuideService {
 		return internalUserMap.values().stream().toList();
 	}
 
+	public List<VisitedLocation> trackAllUserLocations(List<User> users) {
+		List<CompletableFuture<VisitedLocation>> futures = new ArrayList<>();
+
+		for (User user : users) {
+			CompletableFuture<VisitedLocation> future = CompletableFuture.supplyAsync(() -> trackUserLocation(user), executorService);
+			futures.add(future);
+		}
+
+		// Attendre que toutes les tâches se terminent et collecter les résultats.
+		return futures.stream().map(CompletableFuture::join).collect(Collectors.toList());
+	}
+
 	public void addUser(User user) {
 		if (!internalUserMap.containsKey(user.getUserName())) {
 			internalUserMap.put(user.getUserName(), user);
@@ -73,12 +89,22 @@ public class TourGuideService {
 	public List<Provider> getTripDeals(User user) {
 		UserPreferences userPreferences = user.getUserPreferences();
 		int cumulatativeRewardPoints = user.getUserRewards().stream().mapToInt(UserReward::getRewardPoints).sum();
-		List<Provider> providers = tripPricer.getPrice(tripPricerApiKey, user.getUserId(),
-				userPreferences.getNumberOfAdults(), userPreferences.getNumberOfChildren(),
-				userPreferences.getTripDuration(), cumulatativeRewardPoints);
-		providers.addAll(tripPricer.getPrice(tripPricerApiKey, user.getUserId(),
-				userPreferences.getNumberOfAdults(), userPreferences.getNumberOfChildren(),
-				userPreferences.getTripDuration(), cumulatativeRewardPoints));
+		CompletableFuture<List<Provider>> future1 = CompletableFuture.supplyAsync(() ->
+				tripPricer.getPrice(tripPricerApiKey, user.getUserId(),
+						userPreferences.getNumberOfAdults(), userPreferences.getNumberOfChildren(),
+						userPreferences.getTripDuration(), cumulatativeRewardPoints), executorService);
+
+		CompletableFuture<List<Provider>> future2 = CompletableFuture.supplyAsync(() ->
+				tripPricer.getPrice(tripPricerApiKey, user.getUserId(),
+						userPreferences.getNumberOfAdults(), userPreferences.getNumberOfChildren(),
+						userPreferences.getTripDuration(), cumulatativeRewardPoints), executorService);
+
+		List<Provider> providers = future1.thenCombine(future2, (list1, list2) -> {
+			List<Provider> allProviders = new ArrayList<>();
+			allProviders.addAll(list1);
+			allProviders.addAll(list2);
+			return allProviders;
+		}).join();
 
 		user.setTripDeals(providers);
 		return providers;
@@ -92,7 +118,7 @@ public class TourGuideService {
 	}
 
 	public NearbyAttractions getNearByAttractions(VisitedLocation userLocation) {
-		List<AttractionInfo> closestAttractions = gpsUtil.getAttractions().stream()
+		List<AttractionInfo> closestAttractions = gpsUtil.getAttractions().parallelStream()
 				.map(attraction -> rewardsService.getAttractionInfo(attraction, userLocation))
 				.sorted(Comparator.comparingDouble(AttractionInfo::getDistance))
 				.limit(5)
@@ -104,7 +130,18 @@ public class TourGuideService {
 	}
 
 	private void addShutDownHook() {
-		Runtime.getRuntime().addShutdownHook(new Thread(tracker::stopTracking));
+		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+				tracker.stopTracking();
+				executorService.shutdown();
+		try {
+			if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
+				executorService.shutdownNow();
+			}
+		} catch (InterruptedException ex) {
+			executorService.shutdownNow();
+			Thread.currentThread().interrupt();
+		}
+		}));
 	}
 
 	/**********************************************************************************

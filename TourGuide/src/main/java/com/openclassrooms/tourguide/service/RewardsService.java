@@ -10,8 +10,14 @@ import gpsUtil.location.VisitedLocation;
 import org.springframework.stereotype.Service;
 import rewardCentral.RewardCentral;
 
-import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 @Service
 public class RewardsService {
@@ -22,11 +28,14 @@ public class RewardsService {
 	private int proximityBuffer = defaultProximityBuffer;
     private final GpsUtil gpsUtil;
 	private final RewardCentral rewardsCentral;
+
+	private final ExecutorService executorService = Executors.newFixedThreadPool(15);
 	
 	public RewardsService(GpsUtil gpsUtil, RewardCentral rewardCentral) {
 		this.gpsUtil = gpsUtil;
 		this.rewardsCentral = rewardCentral;
 	}
+
 	
 	public void setProximityBuffer(int proximityBuffer) {
 		this.proximityBuffer = proximityBuffer;
@@ -35,21 +44,40 @@ public class RewardsService {
 	public void setDefaultProximityBuffer() {
 		proximityBuffer = defaultProximityBuffer;
 	}
+
+	public void calculateRewardsForAllUsers(List<User> users) {
+		try {
+			List<CompletableFuture<Void>> futures = users.stream()
+					.map(user -> CompletableFuture.runAsync(() -> calculateRewards(user), executorService))
+					.toList();
+
+			CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+		} finally {
+			executorService.shutdown();
+		}
+	}
 	
 	public void calculateRewards(User user) {
-		List<VisitedLocation> userLocationsNotRewarded = user.getVisitedLocations();
-		userLocationsNotRewarded.removeIf(loc -> user.getUserRewards().stream().map(UserReward::getVisitedLocation).toList().contains(loc));
-		List<Attraction> attractionsNotRewarded = new ArrayList<>(gpsUtil.getAttractions().stream().filter(attraction -> !user.getUserRewards().stream().map(UserReward::getAttraction).toList().contains(attraction)).toList());
-		List<UserReward> newRewards = new ArrayList<>();
+		Set<VisitedLocation> userLocationsNotRewarded = user.getVisitedLocations()
+				.stream()
+				.filter(loc
+						-> !user.getUserRewards().stream().map(UserReward::getVisitedLocation).toList().contains(loc)).collect(Collectors.toSet());
+
+		Set<Attraction> attractionsNotRewarded = gpsUtil.getAttractions()
+				.stream()
+				.filter(attraction
+						-> !user.getUserRewards().stream().map(UserReward::getAttraction).toList().contains(attraction)).collect(Collectors.toSet());
+		Set<UserReward> newRewards = new HashSet<>();
 		for(VisitedLocation visitedLocation : userLocationsNotRewarded) {
-			for(Attraction attraction : attractionsNotRewarded) {
+			for(Iterator<Attraction> iterator = attractionsNotRewarded.iterator(); iterator.hasNext();) {
+				Attraction attraction = iterator.next();
 					if(nearAttraction(visitedLocation, attraction)) {
 						newRewards.add(new UserReward(visitedLocation, attraction, getRewardPoints(attraction, user)));
+						iterator.remove();
 					}
 			}
-			attractionsNotRewarded.removeAll(newRewards.stream().map(UserReward::getAttraction).toList());
 		}
-		user.getUserRewards().addAll(newRewards);
+		newRewards.stream().filter(rew -> !user.getUserRewards().contains(rew)).forEach(user::addUserReward);
 	}
 
 	public AttractionInfo getAttractionInfo(Attraction attraction, VisitedLocation userLocation) {

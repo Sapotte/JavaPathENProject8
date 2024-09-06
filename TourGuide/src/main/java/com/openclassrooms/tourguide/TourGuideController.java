@@ -25,6 +25,7 @@ public class TourGuideController {
 
 	@Autowired
 	TourGuideService tourGuideService;
+
     @Qualifier("rewardsService")
     @Autowired
     private RewardsService rewardsService;
